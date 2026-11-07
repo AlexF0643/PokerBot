@@ -5,8 +5,7 @@ from collections import Counter
 import pytest
 
 from card_utils import CATEGORIES, Card, evaluate, full_deck
-from fast_eval import score_hand
-from model import card_id
+from model import card_id, score_hand
 
 DECK = full_deck()
 

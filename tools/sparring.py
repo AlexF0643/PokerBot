@@ -6,10 +6,8 @@ assumption our model makes, such as that bigger bets mean stronger hands.
 
 import random
 
-from fast_eval import score_hand
-from model import Model, _hand_name, card_id
+from model import EQUITY, Model, _hand_name, card_id, score_hand
 from player_action import PlayerAction
-from preflop_table import EQUITY
 from tools import previous_model
 
 

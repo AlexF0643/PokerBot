@@ -10,9 +10,8 @@ import random
 import time
 
 from card_utils import SUITS
-from fast_eval import score_hand
+from model import EQUITY, score_hand
 from player_action import DEALER, PlayerAction
-from preflop_table import EQUITY
 
 RANKS = "23456789TJQKA"
 

@@ -10,9 +10,286 @@ import random
 import time
 
 from card_utils import SUITS
-from fast_eval import score_hand
 from player_action import DEALER, PlayerAction
-from preflop_table import EQUITY
+
+# -- hand evaluation ---------------------------------------------------
+#
+# A card is rank * 4 + suit, with ranks 0 (two) to 12 (ace). A score packs
+# the category and up to five tie-break ranks into one int, so higher scores
+# win and equal scores split. Categories match card_utils.CATEGORIES.
+# score_hand needs 5 to 7 distinct cards and validates nothing, for speed.
+
+_ACE = 12
+_FIVE = 3
+_WHEEL_MASK = 1 << _ACE | 0b1111
+
+
+def _build_straight_high():
+    """Map each 13-bit rank mask to its best straight's high rank, or -1."""
+    table = [-1] * (1 << 13)
+    for mask in range(1 << 13):
+        if mask & _WHEEL_MASK == _WHEEL_MASK:
+            table[mask] = _FIVE
+        for low in range(9):
+            if mask >> low & 0b11111 == 0b11111:
+                table[mask] = low + 4
+    return table
+
+
+def _build_ranks_desc():
+    """Map each 13-bit rank mask to its ranks, highest first."""
+    return [
+        tuple(rank for rank in range(_ACE, -1, -1) if mask >> rank & 1)
+        for mask in range(1 << 13)
+    ]
+
+
+_STRAIGHT_HIGH = _build_straight_high()
+_RANKS_DESC = _build_ranks_desc()
+
+
+def _score(category, *ranks):
+    score = category
+    for rank in ranks:
+        score = score << 4 | rank
+    return score << 4 * (5 - len(ranks))
+
+
+def score_hand(cards):
+    """Score the best five-card hand among 5 to 7 distinct integer cards."""
+    rank_mask = 0
+    suit_masks = [0, 0, 0, 0]
+    counts = [0] * 13
+    for card in cards:
+        rank = card >> 2
+        bit = 1 << rank
+        rank_mask |= bit
+        suit_masks[card & 3] |= bit
+        counts[rank] += 1
+
+    # Seven cards can't hold a flush together with quads or a full house, so a
+    # flush can be returned without checking those.
+    for suit_mask in suit_masks:
+        if suit_mask.bit_count() >= 5:
+            high = _STRAIGHT_HIGH[suit_mask]
+            if high >= 0:
+                return _score(8, high)
+            return _score(5, *_RANKS_DESC[suit_mask][:5])
+
+    quads = -1
+    trips = []
+    pairs = []
+    singles = []
+    ranks = _RANKS_DESC[rank_mask]
+    for rank in ranks:
+        count = counts[rank]
+        if count == 1:
+            singles.append(rank)
+        elif count == 2:
+            pairs.append(rank)
+        elif count == 3:
+            trips.append(rank)
+        else:
+            quads = rank
+
+    if quads >= 0:
+        kicker = next(rank for rank in ranks if rank != quads)
+        return _score(7, quads, kicker)
+
+    if trips and (pairs or len(trips) > 1):
+        # With 7 cards, a second set of trips can supply the pair.
+        return _score(6, trips[0], max(trips[1:] + pairs[:1]))
+
+    high = _STRAIGHT_HIGH[rank_mask]
+    if high >= 0:
+        return _score(4, high)
+
+    if trips:
+        return _score(3, trips[0], *singles[:2])
+
+    if len(pairs) >= 2:
+        # A third pair's rank can be the kicker.
+        return _score(2, pairs[0], pairs[1], max(pairs[2:3] + singles[:1]))
+
+    if pairs:
+        return _score(1, pairs[0], *singles[:3])
+
+    return _score(0, *singles[:5])
+
+
+# Heads-up equity of each starting hand against a random hand, from
+# tools/build_preflop_table.py.
+EQUITY = {
+    "AA": 0.8469,
+    "KK": 0.8220,
+    "QQ": 0.8020,
+    "JJ": 0.7762,
+    "TT": 0.7491,
+    "99": 0.7221,
+    "88": 0.6873,
+    "77": 0.6685,
+    "AKs": 0.6684,
+    "AQs": 0.6620,
+    "AKo": 0.6540,
+    "AJs": 0.6538,
+    "AQo": 0.6476,
+    "ATs": 0.6421,
+    "AJo": 0.6334,
+    "A9s": 0.6323,
+    "KQs": 0.6308,
+    "66": 0.6290,
+    "ATo": 0.6244,
+    "KJs": 0.6194,
+    "A8s": 0.6188,
+    "KTs": 0.6153,
+    "KQo": 0.6151,
+    "A7s": 0.6087,
+    "A9o": 0.6048,
+    "A6s": 0.6018,
+    "A5s": 0.6005,
+    "KJo": 0.6002,
+    "55": 0.5998,
+    "QJs": 0.5991,
+    "KTo": 0.5959,
+    "K9s": 0.5953,
+    "QTs": 0.5926,
+    "A8o": 0.5923,
+    "A7o": 0.5884,
+    "A4s": 0.5866,
+    "K8s": 0.5850,
+    "A5o": 0.5814,
+    "A6o": 0.5813,
+    "A3s": 0.5808,
+    "QJo": 0.5807,
+    "A2s": 0.5792,
+    "K9o": 0.5786,
+    "K7s": 0.5775,
+    "JTs": 0.5769,
+    "Q9s": 0.5764,
+    "QTo": 0.5758,
+    "K6s": 0.5712,
+    "A4o": 0.5685,
+    "44": 0.5662,
+    "K5s": 0.5617,
+    "K8o": 0.5614,
+    "Q8s": 0.5608,
+    "JTo": 0.5573,
+    "J9s": 0.5564,
+    "K7o": 0.5558,
+    "Q9o": 0.5536,
+    "A3o": 0.5530,
+    "A2o": 0.5512,
+    "K4s": 0.5481,
+    "T9s": 0.5436,
+    "K3s": 0.5409,
+    "K6o": 0.5401,
+    "Q7s": 0.5381,
+    "Q8o": 0.5380,
+    "J8s": 0.5373,
+    "J9o": 0.5347,
+    "K5o": 0.5339,
+    "33": 0.5326,
+    "Q6s": 0.5326,
+    "Q5s": 0.5306,
+    "K2s": 0.5275,
+    "T8s": 0.5252,
+    "Q7o": 0.5233,
+    "J7s": 0.5216,
+    "Q4s": 0.5208,
+    "K4o": 0.5179,
+    "T9o": 0.5168,
+    "K3o": 0.5150,
+    "Q6o": 0.5125,
+    "J8o": 0.5105,
+    "22": 0.5087,
+    "K2o": 0.5081,
+    "Q3s": 0.5066,
+    "Q5o": 0.5065,
+    "T7s": 0.5044,
+    "J6s": 0.5036,
+    "98s": 0.5027,
+    "Q2s": 0.5021,
+    "J5s": 0.5012,
+    "J7o": 0.5006,
+    "T8o": 0.4954,
+    "97s": 0.4919,
+    "Q4o": 0.4883,
+    "J4s": 0.4881,
+    "T6s": 0.4840,
+    "J6o": 0.4828,
+    "98o": 0.4828,
+    "J3s": 0.4824,
+    "Q3o": 0.4807,
+    "T7o": 0.4804,
+    "87s": 0.4784,
+    "Q2o": 0.4735,
+    "96s": 0.4712,
+    "J5o": 0.4702,
+    "J2s": 0.4683,
+    "T5s": 0.4677,
+    "97o": 0.4674,
+    "J4o": 0.4635,
+    "T6o": 0.4618,
+    "T4s": 0.4617,
+    "86s": 0.4612,
+    "T3s": 0.4604,
+    "95s": 0.4562,
+    "J3o": 0.4546,
+    "76s": 0.4543,
+    "96o": 0.4497,
+    "85s": 0.4468,
+    "87o": 0.4466,
+    "T2s": 0.4460,
+    "T5o": 0.4459,
+    "94s": 0.4412,
+    "J2o": 0.4408,
+    "86o": 0.4367,
+    "75s": 0.4362,
+    "T4o": 0.4345,
+    "65s": 0.4338,
+    "T3o": 0.4326,
+    "93s": 0.4285,
+    "84s": 0.4264,
+    "76o": 0.4257,
+    "95o": 0.4238,
+    "74s": 0.4211,
+    "92s": 0.4206,
+    "64s": 0.4171,
+    "85o": 0.4161,
+    "T2o": 0.4153,
+    "54s": 0.4152,
+    "83s": 0.4151,
+    "94o": 0.4097,
+    "75o": 0.4068,
+    "73s": 0.4052,
+    "82s": 0.4026,
+    "93o": 0.4012,
+    "65o": 0.3993,
+    "53s": 0.3967,
+    "84o": 0.3934,
+    "63s": 0.3926,
+    "43s": 0.3880,
+    "92o": 0.3867,
+    "74o": 0.3837,
+    "54o": 0.3829,
+    "72s": 0.3822,
+    "52s": 0.3787,
+    "64o": 0.3749,
+    "62s": 0.3749,
+    "83o": 0.3720,
+    "82o": 0.3704,
+    "42s": 0.3664,
+    "63o": 0.3647,
+    "53o": 0.3638,
+    "73o": 0.3616,
+    "32s": 0.3607,
+    "43o": 0.3503,
+    "52o": 0.3422,
+    "72o": 0.3419,
+    "62o": 0.3401,
+    "42o": 0.3337,
+    "32o": 0.3260,
+}
 
 RANKS = "23456789TJQKA"
 
