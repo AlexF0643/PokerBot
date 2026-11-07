@@ -1,7 +1,13 @@
-.venv/
 __pycache__/
-*.py[cod]
-*.egg-info/
+.venv/
+.hypothesis/
 .pytest_cache/
-build/
-dist/
+site-src/node_modules/
+event/
+site_out/
+
+# The front end (the results web page) is kept by the organiser, not here.
+/site/
+/site-src/
+/tests/site_js/
+/event.json
