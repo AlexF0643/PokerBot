@@ -1,0 +1,553 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ineffective Altruists Pokerbot</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: a poker table beside the bot's working, with the match underneath. */
+:root {
+  color-scheme: dark;
+  --ink: #12141c;
+  --panel: #1b1e29;
+  --line: #2f3342;
+  --felt: #1d4a44;
+  --felt-edge: #0f2d2a;
+  --text: #eceae3;
+  --muted: #a3a6b4;
+  --chip: #f2b33d;
+  --good: #57d7a8;
+  --bad: #ff7f76;
+  --card: #f6f3ea;
+  --card-ink: #1a1c24;
+  --card-red: #c22f3a;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+main {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-block: 20px 36px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+h1, h2 { font-family: var(--display); margin: 0; text-wrap: balance; }
+h1 { font-size: 26px; font-weight: 700; }
+h2 { font-size: 13px; font-weight: 500; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+p { margin: 0; }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+header p { color: var(--muted); max-width: 62ch; }
+button {
+  font: inherit; color: var(--text); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--chip); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--chip); border-color: var(--chip); color: var(--card-ink); font-weight: 500; }
+button:disabled { opacity: .4; cursor: default; }
+select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.tabs, .controls, .picks { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.stage { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }
+.stage > *, .lower > * { min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; align-content: start; }
+.table {
+  background: radial-gradient(ellipse at center, var(--felt) 55%, var(--felt-edge) 100%);
+  border-radius: 90px; padding: 22px 28px; display: grid; gap: 16px; justify-items: center; min-height: 340px; align-content: space-between;
+}
+.seat { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.seat-info { font-family: var(--mono); font-size: 13px; display: grid; gap: 1px; }
+.seat-info strong { font-family: var(--body); font-size: 14px; font-weight: 500; }
+.cards { display: flex; gap: 6px; min-height: 62px; }
+.card {
+  width: 44px; height: 62px; border-radius: 5px; background: var(--card); color: var(--card-ink);
+  font-family: var(--display); font-weight: 700; font-size: 19px; line-height: 1;
+  display: grid; place-items: center; align-content: center; gap: 2px;
+}
+.card.red { color: var(--card-red); }
+.card span { font-size: 17px; }
+.card.down { background: repeating-linear-gradient(45deg, #39405a, #39405a 4px, #2c3147 4px, #2c3147 8px); border: 2px solid var(--card); }
+.card.empty { background: none; border: 1px dashed rgba(236, 234, 227, .28); }
+.pot { font-family: var(--mono); color: var(--chip); font-size: 15px; }
+.event { min-height: 22px; font-weight: 500; text-align: center; }
+.controls { justify-content: space-between; }
+.log { font-family: var(--mono); font-size: 13px; max-height: 110px; overflow-y: auto; display: grid; gap: 2px; color: var(--muted); }
+.log .now { color: var(--text); }
+.think-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.equity-track { height: 12px; background: var(--ink); border-radius: 6px; overflow: hidden; }
+.equity-fill { height: 100%; background: var(--good); transition: width .25s; }
+.big { font-family: var(--display); font-size: 30px; font-weight: 700; line-height: 1; }
+.options { display: grid; gap: 4px; }
+.option { display: grid; grid-template-columns: 96px minmax(0, 1fr) 62px; gap: 8px; align-items: center; font-family: var(--mono); font-size: 13px; }
+.option .track { position: relative; height: 16px; background: var(--ink); border-radius: 3px; }
+.option .bar { position: absolute; top: 0; bottom: 0; background: var(--muted); }
+.option .zero { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--text); opacity: .6; }
+.option.chosen { color: var(--chip); font-weight: 500; }
+.option.chosen .bar { background: var(--chip); }
+.option .value { text-align: right; }
+.reasoning { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
+.reasoning > * { min-width: 0; }
+.grid13 { display: grid; grid-template-columns: repeat(13, 17px); gap: 1px; font-family: var(--mono); font-size: 8px; }
+.grid13 div { height: 17px; display: grid; place-items: center; border-radius: 2px; color: var(--muted); background: var(--ink); }
+.note { color: var(--muted); font-size: 13px; }
+.lower { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; }
+svg { display: block; width: 100%; height: auto; }
+svg text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+.reads { display: grid; gap: 6px; font-size: 13px; }
+.read { display: grid; grid-template-columns: minmax(0, 1fr) 46px; gap: 8px; font-family: var(--mono); }
+.read span:last-child { text-align: right; color: var(--text); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 400; }
+.scroll { overflow-x: auto; }
+.pos { color: var(--good); } .neg { color: var(--bad); }
+@media (max-width: 900px) {
+  .stage, .lower { grid-template-columns: minmax(0, 1fr); }
+  .table { border-radius: 40px; padding: 18px 12px; }
+  .reasoning { grid-template-columns: minmax(0, 1fr); }
+  .card { width: 38px; height: 54px; font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .equity-fill { transition: none; } }
+</style>
+
+<main>
+  <header>
+    <div>
+      <h1>Ineffective Altruists Pokerbot</h1>
+      <p>Heads-up no-limit Hold'em, 25 big blinds deep. Step through real recorded hands and see what the bot worked out before each move.</p>
+    </div>
+    <div class="tabs" id="tabs" role="group" aria-label="Opponent"></div>
+  </header>
+
+  <section class="stage">
+    <div class="panel">
+      <div class="table">
+        <div class="seat">
+          <div class="cards" id="their-cards"></div>
+          <div class="seat-info"><strong id="their-name"></strong><span id="their-stack"></span></div>
+        </div>
+        <div class="cards" id="board"></div>
+        <div class="pot" id="pot"></div>
+        <div class="event" id="event" aria-live="polite"></div>
+        <div class="seat">
+          <div class="cards" id="our-cards"></div>
+          <div class="seat-info"><strong id="our-seat"></strong><span id="our-stack"></span></div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="tabs">
+          <button id="prev-hand">Previous hand</button>
+          <select id="hand-select" aria-label="Choose a hand"></select>
+          <button id="next-hand">Next hand</button>
+        </div>
+        <div class="tabs">
+          <button id="back">Step back</button>
+          <button id="step">Next step</button>
+          <button id="play" aria-pressed="false">Play</button>
+        </div>
+      </div>
+      <div class="picks" id="picks"></div>
+      <div class="log" id="log"></div>
+    </div>
+
+    <div class="panel" id="thinking">
+      <div class="think-head"><h2>What the bot worked out</h2><span class="note" id="think-status"></span></div>
+      <div id="think-body" class="panel" style="border:0;padding:0;background:none"></div>
+    </div>
+  </section>
+
+  <section class="lower">
+    <div class="panel">
+      <div class="think-head"><h2>Chips won over this match</h2><span class="note" id="match-result"></span></div>
+      <div id="chart"></div>
+      <p class="note">Click the chart to jump to a hand. A single match is mostly card luck: the table on the right is the better guide to strength.</p>
+      <div>
+        <h2 style="margin-bottom:8px">What it had learned by this hand</h2>
+        <div class="reads" id="reads"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Results over many matches</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Practice opponent</th><th>bb/100</th><th>95% margin</th></tr></thead>
+        <tbody id="results"></tbody>
+      </table></div>
+      <p class="note">16 matches of 200 deals per opponent, playing each deck from both seats. These are practice bots we wrote ourselves, so real opponents may be harder. "previous" is our earlier version.</p>
+      <p class="note">Recorded matches use the first seed, without choosing them for their results. In them the bot switches seats each hand so you can see both; real matches play one seat per rotation.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+const DATA = /*DATA*/null;
+const RESULTS = [
+  ["minraiser", 200.6, 22.1], ["maniac", 169.9, 25.9], ["trapper", 152.8, 19.5],
+  ["polarized", 132.3, 21.1], ["switcher", 103.4, 22.5], ["adaptive", 47.8, 17.4],
+  ["pushfold", 43.6, 10.4], ["tight", 38.2, 9.5], ["balanced", 24.6, 16.3],
+  ["previous", -2.7, 17.8]
+];
+const SUITS = { C: "♣", D: "♦", H: "♥", S: "♠" };
+const READ_LABELS = {
+  fold_to_raise: "Folds to our preflop raise",
+  fold_to_bet: "Folds to our postflop bet",
+  fold_to_all_in: "Folds to our preflop all-in",
+  open_raise: "Raises first in",
+  postflop_bet: "Bets when checked to",
+  bluffs: "Shown-down bets that were weak"
+};
+const $ = id => document.getElementById(id);
+let matchIndex = 0, handIndex = 0, stepIndex = 0, timer = null;
+
+const match = () => DATA.matches[matchIndex];
+const hand = () => match().hands[handIndex];
+const chips = value => (value > 0 ? "+" : "") + Math.round(value);
+
+function cardNode(text, state) {
+  const node = document.createElement("div");
+  node.className = "card";
+  if (state === "down") node.classList.add("down");
+  else if (state === "empty") node.classList.add("empty");
+  else {
+    if (text[1] === "D" || text[1] === "H") node.classList.add("red");
+    const rank = document.createElement("div");
+    rank.textContent = text[0] === "T" ? "10" : text[0];
+    const suit = document.createElement("span");
+    suit.textContent = SUITS[text[1]];
+    node.append(rank, suit);
+    node.setAttribute("aria-label", text);
+  }
+  return node;
+}
+
+function describe(step) {
+  const who = step.who === "us" ? "Bot" : match().name;
+  if (step.kind === "reveal_card") return "Dealer turns over " + step.card;
+  if (step.kind === "fold") return who + " folds";
+  if (step.kind === "call") return who + (step.amount ? " calls " + step.amount : " checks");
+  if (step.kind === "raise") return who + " raises to " + step.amount;
+  if (step.kind === "win") return who + " collects " + step.amount;
+  return "";
+}
+
+function renderTable() {
+  const current = hand();
+  const shown = current.steps.slice(0, stepIndex);
+  const board = shown.filter(step => step.card).map(step => step.card);
+  const last = shown[shown.length - 1];
+  const finished = stepIndex >= current.steps.length;
+
+  const boardNode = $("board");
+  boardNode.replaceChildren();
+  for (let i = 0; i < 5; i++) boardNode.append(board[i] ? cardNode(board[i]) : cardNode("", "empty"));
+
+  $("our-cards").replaceChildren(...current.ours.map(card => cardNode(card)));
+  const theirs = finished && current.theirs.length ? current.theirs.map(card => cardNode(card)) : [cardNode("", "down"), cardNode("", "down")];
+  $("their-cards").replaceChildren(...theirs);
+
+  const button = current.seat === "button";
+  const stacks = last ? last.stacks : (button ? [490, 480] : [480, 490]);
+  $("pot").textContent = "Pot " + (last ? last.pot : 30);
+  $("our-seat").textContent = "Our bot (" + current.seat + ")";
+  $("their-name").textContent = match().name;
+  $("our-stack").textContent = stacks[0] + " chips behind";
+  $("their-stack").textContent = stacks[1] + " chips behind";
+  $("event").textContent = finished
+    ? "Hand over: bot " + chips(current.net) + " chips"
+    : last ? describe(last) : "Blinds posted, cards dealt";
+
+  $("log").replaceChildren(...shown.map((step, index) => {
+    const row = document.createElement("div");
+    row.textContent = describe(step);
+    if (index === shown.length - 1) row.className = "now";
+    return row;
+  }));
+  $("log").scrollTop = $("log").scrollHeight;
+  $("back").disabled = stepIndex === 0;
+  $("step").disabled = finished;
+  $("prev-hand").disabled = handIndex === 0;
+  $("next-hand").disabled = handIndex === match().hands.length - 1;
+}
+
+function latestDecision() {
+  const steps = hand().steps;
+  const upcoming = steps[stepIndex];
+  if (upcoming && upcoming.decision) return { decision: upcoming.decision, pending: true };
+  for (let i = stepIndex - 1; i >= 0; i--) {
+    if (steps[i].decision) return { decision: steps[i].decision, pending: false };
+  }
+  return null;
+}
+
+function renderThinking() {
+  const body = $("think-body");
+  const found = latestDecision();
+  if (!found) {
+    $("think-status").textContent = "";
+    body.replaceChildren(textNote("The bot has not had to act yet in this hand. Step forward to its first decision."));
+    return;
+  }
+  const { decision, pending } = found;
+  $("think-status").textContent = pending ? "About to act" : "Its last decision";
+  if (decision.equity === null) {
+    body.replaceChildren(textNote("Nothing to decide: checking is the only sensible move here."));
+    return;
+  }
+  const options = [];
+  if (decision.to_call > 0) options.push({ label: "Fold", value: 0, key: "fold" });
+  options.push({
+    label: decision.to_call > 0 ? "Call " + decision.to_call : "Check",
+    value: decision.call_value, key: "call"
+  });
+  for (const [total, value] of decision.raises) {
+    options.push({ label: "Raise " + total, value, key: "raise" + total });
+  }
+  const chosenKey = decision.chose === "raise" ? "raise" + decision.amount : decision.chose;
+  const largest = Math.max(1, ...options.map(option => Math.abs(option.value)));
+
+  const head = document.createElement("div");
+  head.className = "think-head";
+  const big = document.createElement("div");
+  big.className = "big";
+  big.textContent = Math.round(decision.equity * 100) + "%";
+  const caption = textNote("chance of winning if the hand reaches showdown, against the " + decision.range_size + " hands it thinks the opponent could hold");
+  head.append(big, caption);
+
+  const track = document.createElement("div");
+  track.className = "equity-track";
+  const fill = document.createElement("div");
+  fill.className = "equity-fill";
+  fill.style.width = decision.equity * 100 + "%";
+  track.append(fill);
+
+  const list = document.createElement("div");
+  list.className = "options";
+  for (const option of options) {
+    const row = document.createElement("div");
+    row.className = "option" + (option.key === chosenKey ? " chosen" : "");
+    const label = document.createElement("span");
+    label.textContent = option.label;
+    const bar = document.createElement("div");
+    bar.className = "track";
+    const fillBar = document.createElement("div");
+    fillBar.className = "bar";
+    const share = Math.abs(option.value) / largest * 50;
+    fillBar.style.left = (option.value >= 0 ? 50 : 50 - share) + "%";
+    fillBar.style.width = share + "%";
+    const zero = document.createElement("div");
+    zero.className = "zero";
+    zero.style.left = "50%";
+    bar.append(fillBar, zero);
+    const value = document.createElement("span");
+    value.className = "value";
+    value.textContent = chips(option.value);
+    row.append(label, bar, value);
+    list.append(row);
+  }
+
+  const reasoning = document.createElement("div");
+  reasoning.className = "reasoning";
+  const left = document.createElement("div");
+  left.style.display = "grid";
+  left.style.gap = "8px";
+  left.style.alignContent = "start";
+  const optionsTitle = document.createElement("h2");
+  optionsTitle.textContent = "Expected chips back";
+  const explain = textNote("The highlighted move is what it played. A raise has to beat the safer option by a margin, so it may not be the top number.");
+  left.append(optionsTitle, list, explain);
+  const right = document.createElement("div");
+  right.style.display = "grid";
+  right.style.gap = "8px";
+  right.style.alignContent = "start";
+  const gridTitle = document.createElement("h2");
+  gridTitle.textContent = "Opponent's likely hands";
+  right.append(gridTitle, rangeGrid(decision.grid));
+  reasoning.append(left, right);
+  body.replaceChildren(head, track, reasoning);
+}
+
+function rangeGrid(digits) {
+  const grid = document.createElement("div");
+  grid.className = "grid13";
+  const ranks = DATA.ranks;
+  grid.setAttribute("role", "img");
+  grid.setAttribute("aria-label", "Grid of starting hands, brighter where the bot thinks the opponent is more likely to hold them");
+  for (let row = 0; row < 13; row++) {
+    for (let column = 0; column < 13; column++) {
+      const cell = document.createElement("div");
+      const weight = Number(digits[row * 13 + column]) / 9;
+      if (weight > 0) {
+        cell.style.background = "rgba(242, 179, 61, " + (0.18 + weight * 0.82) + ")";
+        cell.style.color = weight > 0.45 ? "var(--card-ink)" : "var(--text)";
+      }
+      cell.textContent = row === column ? ranks[row] + ranks[column]
+        : column > row ? ranks[row] + ranks[column] : ranks[column] + ranks[row];
+      grid.append(cell);
+    }
+  }
+  return grid;
+}
+
+function textNote(text) {
+  const node = document.createElement("p");
+  node.className = "note";
+  node.textContent = text;
+  node.style.minWidth = "0";
+  node.style.flex = "1 1 200px";
+  return node;
+}
+
+function renderReads() {
+  const reads = hand().reads;
+  $("reads").replaceChildren(...Object.keys(READ_LABELS).map(key => {
+    const row = document.createElement("div");
+    row.className = "read";
+    const label = document.createElement("span");
+    label.textContent = READ_LABELS[key];
+    const value = document.createElement("span");
+    value.textContent = Math.round(reads[key] * 100) + "%";
+    row.append(label, value);
+    return row;
+  }));
+}
+
+function renderChart() {
+  const running = match().running;
+  const width = 640, height = 150, left = 54, right = 10, top = 8, bottom = 22;
+  const low = Math.min(0, ...running), high = Math.max(0, ...running);
+  const span = Math.max(1, high - low);
+  const x = index => left + (index / (running.length - 1)) * (width - left - right);
+  const y = value => top + (high - value) / span * (height - top - bottom);
+  const points = running.map((value, index) => x(index) + "," + y(value)).join(" ");
+  const cursor = x(handIndex);
+  const tick = value => '<text x="' + (left - 6) + '" y="' + (y(value) + 4) + '" text-anchor="end">' + chips(value) + "</text>";
+  const ticks = Array.from(new Set([low, 0, high])).map(tick).join("");
+  $("chart").innerHTML =
+    '<svg viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="Chips won so far, hand by hand" id="chart-svg" style="cursor:pointer">' +
+    '<line x1="' + left + '" x2="' + (width - right) + '" y1="' + y(0) + '" y2="' + y(0) + '" stroke="#2f3342"/>' +
+    ticks +
+    '<polyline points="' + points + '" fill="none" stroke="#f2b33d" stroke-width="2"/>' +
+    '<line x1="' + cursor + '" x2="' + cursor + '" y1="' + top + '" y2="' + (height - bottom) + '" stroke="#eceae3" stroke-width="1"/>' +
+    '<circle cx="' + cursor + '" cy="' + y(running[handIndex]) + '" r="4" fill="#eceae3"/>' +
+    '<text x="' + left + '" y="' + (height - 6) + '">hand 1</text>' +
+    '<text x="' + (width - right) + '" y="' + (height - 6) + '" text-anchor="end">hand ' + running.length + "</text></svg>";
+  $("chart-svg").addEventListener("click", event => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const share = ((event.clientX - box.left) / box.width * width - left) / (width - left - right);
+    selectHand(Math.max(0, Math.min(running.length - 1, Math.round(share * (running.length - 1)))));
+  });
+  const result = match().bb_per_100;
+  const label = $("match-result");
+  label.textContent = "this match: " + (result > 0 ? "+" : "") + result + " bb/100";
+  label.className = "note " + (result >= 0 ? "pos" : "neg");
+}
+
+function renderPicks() {
+  const hands = match().hands;
+  const byNet = hands.slice().sort((a, b) => b.net - a.net);
+  const picks = [
+    ["Biggest win", byNet[0]],
+    ["Biggest loss", byNet[byNet.length - 1]],
+    ["A bluff that worked", hands.slice().reverse().find(item => item.tags.includes("bluff"))],
+    ["A big fold", hands.slice().reverse().find(item => item.tags.includes("big fold"))]
+  ].filter(pick => pick[1]);
+  $("picks").replaceChildren(...picks.map(([label, item]) => {
+    const pick = document.createElement("button");
+    pick.textContent = label + " (hand " + item.n + ")";
+    pick.addEventListener("click", () => selectHand(item.n - 1));
+    return pick;
+  }));
+}
+
+function renderHandSelect() {
+  $("hand-select").replaceChildren(...match().hands.map((item, index) => {
+    const option = document.createElement("option");
+    option.value = index;
+    option.textContent = "Hand " + item.n + " (" + chips(item.net) + ")";
+    return option;
+  }));
+}
+
+function render() {
+  $("hand-select").value = handIndex;
+  renderTable();
+  renderThinking();
+  renderReads();
+  renderChart();
+}
+
+function stop() {
+  clearInterval(timer);
+  timer = null;
+  $("play").setAttribute("aria-pressed", "false");
+  $("play").textContent = "Play";
+}
+
+function selectHand(index) {
+  handIndex = index;
+  stepIndex = 0;
+  render();
+}
+
+function selectMatch(index) {
+  stop();
+  matchIndex = index;
+  [...$("tabs").children].forEach((tab, position) => tab.setAttribute("aria-pressed", String(position === index)));
+  renderHandSelect();
+  renderPicks();
+  const first = match().hands.findIndex(item => item.steps.length > 6);
+  selectHand(first < 0 ? 0 : first);
+}
+
+function step(delta) {
+  stepIndex = Math.max(0, Math.min(hand().steps.length, stepIndex + delta));
+  render();
+}
+
+function tick() {
+  if (stepIndex < hand().steps.length) step(1);
+  else if (handIndex < match().hands.length - 1) selectHand(handIndex + 1);
+  else stop();
+}
+
+const tabs = $("tabs");
+DATA.matches.forEach((item, index) => {
+  const tab = document.createElement("button");
+  tab.textContent = "vs " + item.name;
+  tab.addEventListener("click", () => selectMatch(index));
+  tabs.append(tab);
+});
+$("results").replaceChildren(...RESULTS.map(([name, value, margin]) => {
+  const row = document.createElement("tr");
+  const verdict = value - margin > 0 ? "pos" : value + margin < 0 ? "neg" : "";
+  row.innerHTML = "<td>" + name + '</td><td class="' + verdict + '">' + (value > 0 ? "+" : "") + value.toFixed(1) + "</td><td>±" + margin.toFixed(1) + "</td>";
+  return row;
+}));
+$("step").addEventListener("click", () => { stop(); step(1); });
+$("back").addEventListener("click", () => { stop(); step(-1); });
+$("prev-hand").addEventListener("click", () => { stop(); selectHand(handIndex - 1); });
+$("next-hand").addEventListener("click", () => { stop(); selectHand(handIndex + 1); });
+$("hand-select").addEventListener("change", event => { stop(); selectHand(Number(event.target.value)); });
+$("play").addEventListener("click", () => {
+  if (timer) { stop(); return; }
+  timer = setInterval(tick, 1700);
+  $("play").setAttribute("aria-pressed", "true");
+  $("play").textContent = "Pause";
+});
+document.addEventListener("keydown", event => {
+  if (event.target.tagName === "SELECT") return;
+  if (event.key === "ArrowRight") { stop(); step(1); }
+  if (event.key === "ArrowLeft") { stop(); step(-1); }
+});
+selectMatch(0);
+</script>
