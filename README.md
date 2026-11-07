@@ -21,7 +21,8 @@ The organisers' original instructions follow our notes, from
 
 At each decision, the bot estimates how many chips it would get back from
 folding, calling and several raise sizes, then picks the best. A raise has to
-beat the safer option by a margin that grows with its size.
+beat the safer option by a margin that grows with its size. It also won't raise
+all-in with under 30% equity against the hands it expects to call.
 
 1. **Simulation:** it plays the hand out 600 times against the hands the
    opponent could hold. On the river it checks each of those hands once.
@@ -96,17 +97,17 @@ Against the practice bots and `tight`, over 16 matches of 200 deals per opponent
 
 | Opponent | Style | bb/100 | 95% margin |
 |---|---|---:|---:|
-| `minraiser` | Min-raises and rarely folds | +200.6 | 22.1 |
-| `maniac` | Constant large bluffs | +169.9 | 25.9 |
-| `trapper` | Slow-plays strong hands, bets weak ones | +152.8 | 19.5 |
-| `polarized` | Small bets with medium hands, shoves with its best and air | +132.3 | 21.1 |
-| `switcher` | Tight for 60 hands, then a maniac | +103.4 | 22.5 |
-| `adaptive` | Learns how often we fold and attacks it | +47.8 | 17.4 |
+| `minraiser` | Min-raises and rarely folds | +191.5 | 22.0 |
+| `maniac` | Constant large bluffs | +163.9 | 26.0 |
+| `trapper` | Slow-plays strong hands, bets weak ones | +154.3 | 19.5 |
+| `polarized` | Small bets with medium hands, shoves with its best and air | +136.6 | 21.2 |
+| `switcher` | Tight for 60 hands, then a maniac | +106.5 | 22.6 |
+| `adaptive` | Learns how often we fold and attacks it | +49.4 | 15.6 |
 | `pushfold` | Shoves or folds preflop | +43.6 | 10.4 |
-| `tight` | Organiser dummy that plays strong hands only | +38.2 | 9.5 |
-| `balanced` | Sound ranges with steady bluffs | +24.6 | 16.3 |
-| `previous` | Our earlier version | -2.7 | 17.8 |
-| **Average** | | **+91.0** | |
+| `tight` | Organiser dummy that plays strong hands only | +40.8 | 8.1 |
+| `balanced` | Sound ranges with steady bluffs | +36.3 | 14.9 |
+| `previous` | Our earlier version | -1.5 | 17.9 |
+| **Average** | | **+92.1** | |
 
 Against the organisers' dummies, using `python -m evals --deals 300` (600 hands
 each, with no faults):
@@ -114,19 +115,23 @@ each, with no faults):
 | Opponent | bb/100 | 95% margin |
 |---|---:|---:|
 | `call` | +544.2 | 72.6 |
-| `random` | +380.1 | 95.8 |
+| `random` | +315.6 | 89.4 |
 | `shove` | +254.2 | 94.5 |
-| `equity` | +241.0 | 64.6 |
+| `equity` | +187.5 | 60.4 |
 | `fold` | +74.7 | 0.7 |
-| `tight` | +31.6 | 30.4 |
+| `tight` | +42.4 | 25.7 |
 
 Known weaknesses:
 
-- Postflop raises still return less than the bot predicts. For example, flop
-  shoves against `balanced` were predicted at 147 chips and returned about 72.
-- It is about level with `balanced` and with its own earlier version.
-- The last round of changes raised the average from +85.4 to +91.0, which is too
-  small a gain to prove statistically.
+- Earlier versions overrated postflop raises. For example, flop shoves against
+  `balanced` were predicted at 147 chips and returned about 72. We haven't
+  re-measured this since adding the all-in rule.
+- It is level with its own earlier version, and only modestly ahead of `balanced`.
+- The all-in rule costs chips against bots that raise at random: `random` fell
+  from +392 (8 matches) to +318 (16 matches). We accepted this because the rule
+  protects against selective callers like `balanced`.
+- Overall strength barely changed in the last two rounds of tuning. The average
+  went from +85.4 to +91.0 and then +92.1, too small a gain to prove statistically.
 
 ## Demo
 
@@ -137,9 +142,9 @@ learned so far. Use **Next step** or the arrow keys to move through a hand, or
 **Play** to run hands automatically.
 
 The recorded matches all use one fixed seed and weren't chosen for their results:
-`trapper` +86.0, `maniac` +157.0 and `balanced` -70.2 bb/100. A single match is
-mostly card luck. The bot swaps seats every hand in these recordings so viewers
-see both seats, whereas real matches play one seat per rotation.
+`trapper` +86.0, `maniac` +135.5 and `balanced` +3.0 bb/100. One match says little
+about strength. The bot swaps seats every hand in these recordings so viewers see
+both seats, whereas real matches play one seat per rotation.
 
 To rebuild the page after changing the bot:
 

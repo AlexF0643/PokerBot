@@ -54,6 +54,8 @@ RAISE_RISK_PREMIUM = 0.03  # share of the chips the raise adds
 # tools/calibrate.py measures this gap.
 POSTFLOP_CALLED_EQUITY = 0.90
 POSTFLOP_SHOVE_PREMIUM = 0.10  # replaces the premium for postflop all-ins
+PREFLOP_SHOVE_PREMIUM = 0.03  # replaces the premium for preflop all-ins
+MIN_CALLED_EQUITY = 0.30  # no all-in raise below this against likely callers
 
 # What showdowns teach, as (prior share, weight in hands). Bluffs are bets made
 # with weak hands; traps are strong hands played passively.
@@ -410,8 +412,15 @@ class Model:
                 value = self._raise_value(state, total, team, equity, realized)
                 added = total - state.bets[me]
                 premium = RAISE_RISK_PREMIUM
-                if self.board and self._puts_them_all_in(state, total):
-                    premium = POSTFLOP_SHOVE_PREMIUM
+                if self._puts_them_all_in(state, total):
+                    point = "all_in_postflop" if self.board else "all_in_preflop"
+                    fold = self._rates(team, point)[0]
+                    if equity(0.0, 1.0 - fold) < MIN_CALLED_EQUITY:
+                        continue
+                    premium = (
+                        POSTFLOP_SHOVE_PREMIUM if self.board
+                        else PREFLOP_SHOVE_PREMIUM
+                    )
                 score = value - RAISE_MARGIN - premium * added
                 if score > best_score:
                     best_kind, best_total = "raise", total

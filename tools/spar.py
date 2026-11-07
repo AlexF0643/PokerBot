@@ -19,7 +19,7 @@ from engine import play_hand
 from model import Model
 from tools.sparring import SPARRING
 
-OPPONENTS = {**SPARRING, "tight": DUMMIES["tight"], "equity": DUMMIES["equity"]}
+OPPONENTS = {**SPARRING, **DUMMIES}
 
 
 def play_match(task):
