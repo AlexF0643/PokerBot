@@ -1,3 +1,166 @@
+# Ineffective Altruists Pokerbot
+
+Our entry for the Pokerbot Challenge at GreatUniHack 2026, run by MUDS AI: a
+Python bot for heads-up no-limit Texas hold'em. It only plays in this
+competition's engine and against other bots, not on real-money sites.
+
+The organisers' original instructions follow our notes, from
+[Poker bot hackathon](#poker-bot-hackathon) onwards.
+
+## The competition
+
+- Every bot plays every other bot heads-up, and the best overall bb/100 (big
+  blinds won per 100 hands) wins.
+- Every hand starts with 500 chips and 10/20 blinds, so 25 big blinds deep.
+- Each deck is played from both seats. The bot is rebuilt from its pickle for
+  each seat rotation, so it forgets what it learned between them.
+- Each move has a 10 second limit. A crash, timeout or illegal move is a fault,
+  and a bot that times out is out for the rest of that match.
+
+## How the bot plays
+
+At each decision, the bot estimates how many chips it would get back from
+folding, calling and several raise sizes, then picks the best. A raise has to
+beat the safer option by a margin that grows with its size.
+
+1. **Simulation:** it plays the hand out 600 times against the hands the
+   opponent could hold. On the river it checks each of those hands once.
+2. **Learning rates:** it counts how each opponent folds, calls, raises and
+   shoves in each situation, starting from assumed rates that count for 14 hands.
+3. **Narrowing the range:** it uses those rates to narrow down what the
+   opponent holds after each move.
+4. **Learning from showdowns:** it uses revealed cards to judge how often that
+   opponent bluffs and slow-plays.
+
+Any internal error falls back to a legal check or fold, so an error can't cause
+a fault. The test suite runs the bot without this fallback, so bugs still show.
+
+Strong poker research systems such as Libratus, Pluribus and DeepStack need far
+more computing power than a one-day event allows. This bot aims to exploit the
+habits of the bots it meets, and it doesn't try to play a near-perfect strategy.
+
+## Files
+
+Uploaded with the submission:
+
+| File | What it is |
+|---|---|
+| `model.py` | The bot |
+| `fast_eval.py` | A hand evaluator about 45 times faster than the engine's |
+| `preflop_table.py` | Each starting hand's equity against a random hand |
+
+Our tools, which aren't uploaded:
+
+| File | What it does |
+|---|---|
+| `tools/sparring.py` | Nine practice bots in different styles |
+| `tools/spar.py` | Plays the bot against the practice bots in the real format |
+| `tools/calibrate.py` | Compares the value the bot predicts with what it wins |
+| `tools/record_demo.py` | Records matches and builds the demo page |
+| `tools/build_preflop_table.py` | Regenerates `preflop_table.py` |
+| `tools/previous_model.py` | A frozen earlier version of the bot to play against |
+
+## Testing the bot
+
+Run these from the repo root. On macOS or Linux, use `.venv/bin/python`.
+
+```sh
+# Is it a valid submission?
+.venv\Scripts\python -m pytest tests/test_model.py -q
+
+# Would the organisers accept it?
+.venv\Scripts\python -m submit --team ineffective-altruists
+
+# How does it do against the organisers' dummy bots?
+.venv\Scripts\python -m evals
+
+# How does it do against the tougher practice bots?
+.venv\Scripts\python -m tools.spar --deals 200 --seeds 8
+
+# How does it do against another team's bot? Their .py files must be importable.
+.venv\Scripts\python -m evals --opponents path\to\their_bot.pkl --deals 1000
+
+# Where is it leaking chips?
+.venv\Scripts\python -m tools.calibrate balanced --seeds 8
+```
+
+Trust a result only when its margin doesn't include 0.
+
+## Results
+
+These come from bots we wrote or the organisers' simple dummies, and we tuned
+against the practice bots, so they probably flatter the bot. They don't predict
+a tournament result.
+
+Against the practice bots and `tight`, over 16 matches of 200 deals per opponent:
+
+| Opponent | Style | bb/100 | 95% margin |
+|---|---|---:|---:|
+| `minraiser` | Min-raises and rarely folds | +200.6 | 22.1 |
+| `maniac` | Constant large bluffs | +169.9 | 25.9 |
+| `trapper` | Slow-plays strong hands, bets weak ones | +152.8 | 19.5 |
+| `polarized` | Small bets with medium hands, shoves with its best and air | +132.3 | 21.1 |
+| `switcher` | Tight for 60 hands, then a maniac | +103.4 | 22.5 |
+| `adaptive` | Learns how often we fold and attacks it | +47.8 | 17.4 |
+| `pushfold` | Shoves or folds preflop | +43.6 | 10.4 |
+| `tight` | Organiser dummy that plays strong hands only | +38.2 | 9.5 |
+| `balanced` | Sound ranges with steady bluffs | +24.6 | 16.3 |
+| `previous` | Our earlier version | -2.7 | 17.8 |
+| **Average** | | **+91.0** | |
+
+Against the organisers' dummies, using `python -m evals --deals 300` (600 hands
+each, with no faults):
+
+| Opponent | bb/100 | 95% margin |
+|---|---:|---:|
+| `call` | +544.2 | 72.6 |
+| `random` | +380.1 | 95.8 |
+| `shove` | +254.2 | 94.5 |
+| `equity` | +241.0 | 64.6 |
+| `fold` | +74.7 | 0.7 |
+| `tight` | +31.6 | 30.4 |
+
+Known weaknesses:
+
+- Postflop raises still return less than the bot predicts. For example, flop
+  shoves against `balanced` were predicted at 147 chips and returned about 72.
+- It is about level with `balanced` and with its own earlier version.
+- The last round of changes raised the average from +85.4 to +91.0, which is too
+  small a gain to prove statistically.
+
+## Demo
+
+Open `demo/index.html` in a browser. It replays real recorded hands and shows
+what the bot worked out before each move: its chance of winning, the chips it
+expected back from each option, the opponent's likely hands and what it had
+learned so far. Use **Next step** or the arrow keys to move through a hand, or
+**Play** to run hands automatically.
+
+The recorded matches all use one fixed seed and weren't chosen for their results:
+`trapper` +86.0, `maniac` +157.0 and `balanced` -70.2 bb/100. A single match is
+mostly card luck. The bot swaps seats every hand in these recordings so viewers
+see both seats, whereas real matches play one seat per rotation.
+
+To rebuild the page after changing the bot:
+
+```sh
+.venv\Scripts\python -m tools.record_demo
+```
+
+## Submitting
+
+The form opens at 16:00 and closes at 18:00 on 7 November 2026, and the newest
+upload that works is the one that plays.
+
+```sh
+.venv\Scripts\python -m submit --team ineffective-altruists
+```
+
+Upload `ineffective-altruists.pkl`, `model.py`, `fast_eval.py` and
+`preflop_table.py`.
+
+---
+
 # Poker bot hackathon
 
 Write a bot that plays no-limit Texas hold'em. Your bot is a `Model` in
