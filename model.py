@@ -25,9 +25,10 @@ THINK_SECONDS = 4.0  # the limit is 10 s per move, on an unknown machine
 #   versus_limp: after our limp     check_or_bet: postflop, nothing to call
 #   versus_bet: postflop, facing our bet or raise
 #   versus_reraise: facing our raise, having already raised this street
-#   versus_all_in: facing a raise of ours that puts them all-in
+#   all_in_preflop, all_in_postflop: facing a raise that puts them all-in
 PRIORS = {
-    "versus_all_in": (0.55, 0.45, 0.0, 0.0),
+    "all_in_preflop": (0.55, 0.45, 0.0, 0.0),
+    "all_in_postflop": (0.35, 0.65, 0.0, 0.0),
     "versus_reraise": (0.20, 0.50, 0.20, 0.10),
     "open": (0.25, 0.35, 0.35, 0.05),
     "versus_raise": (0.40, 0.42, 0.12, 0.06),
@@ -44,7 +45,14 @@ REALIZED_OUT_OF_POSITION = 0.88
 PREFLOP_RAISE_SIZES = (2.5, 3.5)  # in big blinds when opening
 RERAISE_MULTIPLE = 3.0
 POT_FRACTIONS = (0.5, 0.75, 1.0)
-RAISE_MARGIN = 1.0  # chips a raise must gain over the best passive action
+# A raise must beat the best passive action by this much, because estimates
+# run high and bigger bets have more riding on them.
+RAISE_MARGIN = 2.0  # chips
+RAISE_RISK_PREMIUM = 0.03  # share of the chips the raise adds
+# Opponents choose to continue after seeing their cards, so hands that call a
+# postflop raise beat us more often than ranking them by strength suggests.
+# tools/calibrate.py measures this gap.
+POSTFLOP_CALLED_EQUITY = 0.90
 
 
 def card_id(card):
@@ -82,6 +90,7 @@ class Model:
     def __init__(self):
         self.rng = random.Random(20261107)
         self.stats = {}  # team name -> decision point -> action counts
+        self.last_estimate = 0.0  # chips back expected from the last decision
         self.hand = []
         self.player_id = None
         self.my_cards = ()
@@ -168,7 +177,7 @@ class Model:
 
     def _decision_point(self):
         if self.we_raised and self.we_shoved:
-            return "versus_all_in"
+            return "all_in_postflop" if self.board else "all_in_preflop"
         if self.we_raised and self.they_raised:
             return "versus_reraise"
         if len(self.board) >= 3:
@@ -305,14 +314,19 @@ class Model:
         passive_value = call_value if to_call == 0 else max(call_value, 0.0)
         best_kind = "call" if to_call == 0 or call_value > 0.0 else "fold"
         best_total = 0
-        best_value = passive_value + RAISE_MARGIN
+        best_value = passive_value
+        best_score = passive_value
 
         if state.can_raise:
             for total in self._raise_totals(state):
-                value = self._raise_value(state, total, team, equity)
-                if value > best_value:
-                    best_kind, best_total, best_value = "raise", total, value
+                value = self._raise_value(state, total, team, equity, realized)
+                added = total - state.bets[me]
+                score = value - RAISE_MARGIN - RAISE_RISK_PREMIUM * added
+                if score > best_score:
+                    best_kind, best_total = "raise", total
+                    best_value, best_score = value, score
 
+        self.last_estimate = best_value
         if best_kind == "raise":
             self.we_shoved = self._puts_them_all_in(state, best_total)
             return PlayerAction.raise_to(me, best_total)
@@ -345,7 +359,7 @@ class Model:
         totals.append(cap)
         return sorted({_clamp(total, low, max(low, cap)) for total in totals})
 
-    def _raise_value(self, state, total, team, equity):
+    def _raise_value(self, state, total, team, equity, realized):
         """Estimated chips back from raising to total, against our rates."""
         me = self.player_id
         opponent = 1 - me
@@ -353,7 +367,10 @@ class Model:
         ours = total - state.bets[me]
         theirs = min(total - state.bets[opponent], state.stacks[opponent])
         if self._puts_them_all_in(state, total):
-            fold, _, raised, shove = self._rates(team, "versus_all_in")
+            # Nothing is left to bet, so no equity is lost on later streets.
+            realized = 1.0
+            point = "all_in_postflop" if self.board else "all_in_preflop"
+            fold, _, raised, shove = self._rates(team, point)
         else:
             if self.they_raised:
                 point = "versus_reraise"
@@ -370,7 +387,9 @@ class Model:
         value = fold * pot
         final_pot = pot + ours + theirs
         if called > 0.0:
-            win_share = equity(reraise, reraise + called)
+            win_share = equity(reraise, reraise + called) * realized
+            if self.board:
+                win_share *= POSTFLOP_CALLED_EQUITY
             value += called * (win_share * final_pot - ours)
         if reraise > 0.0:
             extra = min(behind, int(ours * 1.5))

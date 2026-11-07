@@ -61,8 +61,11 @@ def test_takes_the_blinds_from_a_folder():
 def test_tracks_answers_to_all_ins_separately():
     model = StrictModel()
     play(model, DUMMIES["call"](seed=1), 60)
-    counts = model.stats["them"]["versus_all_in"]
-    assert counts[1] > 0 and counts[0] == 0
+    points = model.stats["them"]
+    counts = [points.get(name, (0, 0)) for name in
+              ("all_in_preflop", "all_in_postflop")]
+    assert sum(count[1] for count in counts) > 0
+    assert all(count[0] == 0 for count in counts)
 
 
 def test_range_narrows_after_a_raise():
