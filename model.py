@@ -36,7 +36,7 @@ PRIORS = {
     "check_or_bet": (0.0, 0.55, 0.42, 0.03),
     "versus_bet": (0.42, 0.42, 0.12, 0.04),
 }
-PRIOR_WEIGHT = 8
+PRIOR_WEIGHT = 14
 ACTION_INDEX = {"fold": 0, "call": 1, "raise": 2, "shove": 3}
 
 # How much of a hand's equity survives later betting without the last word.
@@ -53,6 +53,14 @@ RAISE_RISK_PREMIUM = 0.03  # share of the chips the raise adds
 # postflop raise beat us more often than ranking them by strength suggests.
 # tools/calibrate.py measures this gap.
 POSTFLOP_CALLED_EQUITY = 0.90
+POSTFLOP_SHOVE_PREMIUM = 0.10  # replaces the premium for postflop all-ins
+
+# What showdowns teach, as (prior share, weight in hands). Bluffs are bets made
+# with weak hands; traps are strong hands played passively.
+SHOWDOWN_LEARNING = 1.0  # 0.0 switches it off
+BLUFF_PRIOR = (0.20, 6)
+TRAP_PRIOR = (0.50, 6)
+PREFLOP_BLUFF_PRIOR = (0.03, 6)
 
 
 def card_id(card):
@@ -80,6 +88,28 @@ def _combos_by_strength():
 
 
 ALL_COMBOS = _combos_by_strength()
+# An even spread of hands to measure a shown hand against on a board.
+BOARD_SAMPLE = ALL_COMBOS[::9]
+
+
+def _preflop_top_share(first, second):
+    """The share of hands at least as strong as this one, from 0 to 1."""
+    equity = EQUITY[_hand_name(first, second)]
+    stronger = sum(1 for value in EQUITY.values() if value > equity)
+    return stronger / len(EQUITY)
+
+
+def _beats_share(combo, board):
+    """The share of other hands this hand beats on this board."""
+    taken = set(board) | set(combo)
+    mine = score_hand([*combo, *board])
+    beaten = total = 0
+    for other in BOARD_SAMPLE:
+        if other[0] in taken or other[1] in taken:
+            continue
+        total += 1
+        beaten += score_hand([*other, *board]) < mine
+    return beaten / max(1, total)
 
 
 def _clamp(value, low, high):
@@ -90,6 +120,9 @@ class Model:
     def __init__(self):
         self.rng = random.Random(20261107)
         self.stats = {}  # team name -> decision point -> action counts
+        self.reads = {}  # team name -> what its shown hands revealed
+        self.their_moves = []  # this hand: (board, kind) for each of theirs
+        self.shown = []
         self.last_estimate = 0.0  # chips back expected from the last decision
         self.hand = []
         self.player_id = None
@@ -114,6 +147,8 @@ class Model:
         self.we_raised = False
         self.they_raised = False
         self.we_shoved = False
+        self.their_moves = []
+        self.shown = []
 
     def run(self, actions, game_state):
         try:
@@ -157,6 +192,8 @@ class Model:
                     if len(self.board) >= 3:
                         self.we_raised = False
                         self.they_raised = False
+                elif action.player_id == opponent:
+                    self.shown.append(card_id(action.card))
                 continue
             if action.player_id == me:
                 self.we_acted = True
@@ -171,9 +208,44 @@ class Model:
             point = self._decision_point()
             self._count(team, point, kind)
             self._narrow_range(team, point, kind)
+            self.their_moves.append((tuple(self.board), kind))
             self.we_raised = False
             if kind in ("raise", "shove"):
                 self.they_raised = True
+        if not in_turn and len(self.shown) == 2 and SHOWDOWN_LEARNING:
+            self._learn_from_showdown(team)
+
+    def _learn_from_showdown(self, team):
+        """Record what the opponent's moves meant, now its cards are known."""
+        reads = self.reads.setdefault(team, {
+            "bluffs": 0, "value_bets": 0, "strong_bets": 0, "traps": 0,
+            "preflop_raises": 0, "preflop_bluffs": 0,
+        })
+        combo = tuple(self.shown)
+        for board, kind in self.their_moves:
+            aggressive = kind in ("raise", "shove")
+            if not board:
+                if aggressive:
+                    reads["preflop_raises"] += 1
+                    if _preflop_top_share(*combo) > 0.5:
+                        reads["preflop_bluffs"] += 1
+                continue
+            if kind == "fold":
+                continue
+            beaten = _beats_share(combo, board)
+            if aggressive:
+                reads["value_bets" if beaten >= 0.5 else "bluffs"] += 1
+                reads["strong_bets"] += beaten >= 0.8
+            elif beaten >= 0.8:
+                reads["traps"] += 1
+
+    def _read(self, team, part, whole, prior):
+        """A share learned from showdowns, starting from a prior."""
+        reads = self.reads.get(team, {})
+        share, weight = prior
+        hits = sum(reads.get(key, 0) for key in part)
+        total = sum(reads.get(key, 0) for key in whole)
+        return (hits + share * weight) / (total + weight)
 
     def _decision_point(self):
         if self.we_raised and self.we_shoved:
@@ -203,19 +275,34 @@ class Model:
             aggressive = raised + shove
             if kind == "call":
                 # Some strong hands slow-play, and draws look weak but call.
-                self._keep_slice(aggressive * 0.5, aggressive + call, 0.25)
+                traps = self._read(
+                    team, ("traps",), ("traps", "strong_bets"), TRAP_PRIOR
+                )
+                self._keep_slice(
+                    aggressive * (1.0 - traps), aggressive + call, 0.25
+                )
             else:
-                self._keep_slice(0.0, aggressive, 0.2)
+                bluffs = self._read(
+                    team, ("bluffs",), ("bluffs", "value_bets"), BLUFF_PRIOR
+                )
+                self._keep_slice(0.0, aggressive, _clamp(bluffs, 0.05, 0.9))
         elif kind == "shove":
-            self._keep_slice(0.0, shove, 0.0)
+            self._keep_slice(0.0, shove, self._preflop_bluffs(team))
         elif kind == "raise":
-            self._keep_slice(shove * 0.5, shove + raised, 0.0)
+            self._keep_slice(
+                shove * 0.5, shove + raised, self._preflop_bluffs(team)
+            )
         else:
             self._keep_slice(shove + raised, shove + raised + call, 0.0)
 
+    def _preflop_bluffs(self, team):
+        return self._read(
+            team, ("preflop_bluffs",), ("preflop_raises",), PREFLOP_BLUFF_PRIOR
+        )
+
     def _keep_slice(self, top_low, top_high, keep_weaker):
         """Keep hands between two fractions from the top of the range, plus
-        a random share of the weaker hands (bluffs and draws)."""
+        a random share of the weaker hands (bluffs and draws), in order."""
         size = len(self.range)
         top_high = max(top_high, top_low + 0.03)
         start = int(size * (1.0 - _clamp(top_high, 0.0, 1.0)))
@@ -226,7 +313,8 @@ class Model:
         kept = self.range[start:end]
         if keep_weaker and weaker:
             count = int(len(weaker) * keep_weaker)
-            kept = self.rng.sample(weaker, count) + kept
+            chosen = sorted(self.rng.sample(range(len(weaker)), count))
+            kept = [weaker[index] for index in chosen] + kept
         self.range = kept
 
     def _sort_range(self):
@@ -321,7 +409,10 @@ class Model:
             for total in self._raise_totals(state):
                 value = self._raise_value(state, total, team, equity, realized)
                 added = total - state.bets[me]
-                score = value - RAISE_MARGIN - RAISE_RISK_PREMIUM * added
+                premium = RAISE_RISK_PREMIUM
+                if self.board and self._puts_them_all_in(state, total):
+                    premium = POSTFLOP_SHOVE_PREMIUM
+                score = value - RAISE_MARGIN - premium * added
                 if score > best_score:
                     best_kind, best_total = "raise", total
                     best_value, best_score = value, score

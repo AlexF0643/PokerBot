@@ -12,6 +12,7 @@ import math
 import multiprocessing
 import random
 
+import model as model_module
 from arena.dummies import DUMMIES
 from card_utils import full_deck
 from engine import play_hand
@@ -23,7 +24,9 @@ OPPONENTS = {**SPARRING, "tight": DUMMIES["tight"], "equity": DUMMIES["equity"]}
 
 def play_match(task):
     """Our big blinds won per hand, one value for each deck."""
-    name, seed, deals = task
+    name, seed, deals, overrides = task
+    for constant, value in overrides.items():
+        setattr(model_module, constant, value)
     values = [0.0] * deals
     faults = 0
     for rotation in range(2):
@@ -48,10 +51,18 @@ def main():
     parser.add_argument("--deals", type=int, default=200)
     parser.add_argument("--seeds", type=int, default=8)
     parser.add_argument("--opponents", nargs="+", default=list(OPPONENTS))
+    parser.add_argument(
+        "--set", nargs="*", default=[], metavar="NAME=VALUE",
+        help="try a different value for a constant in model.py",
+    )
     args = parser.parse_args()
+    overrides = {
+        constant: float(value)
+        for constant, value in (item.split("=") for item in args.set)
+    }
 
     tasks = [
-        (name, seed, args.deals)
+        (name, seed, args.deals, overrides)
         for name in args.opponents
         for seed in range(args.seeds)
     ]
@@ -62,6 +73,7 @@ def main():
             results[name].append(values)
             faults[name] += count
 
+    print(f"settings: {args.set or 'as in model.py'}")
     print(f"{'opponent':<12}{'bb/100':>10}{'95% CI':>9}"
           f"{'worst':>9}{'best':>9}{'faults':>8}")
     overall = []

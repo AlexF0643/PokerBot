@@ -10,6 +10,7 @@ from fast_eval import score_hand
 from model import Model, _hand_name, card_id
 from player_action import PlayerAction
 from preflop_table import EQUITY
+from tools import previous_model
 
 
 class Base:
@@ -290,7 +291,16 @@ class Mirror(Model):
         self.rng = random.Random(seed)
 
 
+class Previous(previous_model.Model):
+    """A frozen earlier version: the new one has to beat it directly."""
+
+    def __init__(self, seed=0):
+        super().__init__()
+        self.rng = random.Random(seed)
+
+
 SPARRING = {
+    "previous": Previous,
     "pushfold": PushFold,
     "balanced": Balanced,
     "maniac": Maniac,

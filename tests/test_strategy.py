@@ -55,7 +55,8 @@ def test_learns_that_a_shover_always_shoves():
 def test_takes_the_blinds_from_a_folder():
     model = StrictModel()
     assert play(model, DUMMIES["fold"](seed=1), 60) > 0
-    assert model._rates("them", "versus_raise")[0] > 0.7
+    fold, call, raised, shove = model.stats["them"]["versus_raise"]
+    assert fold > 0 and call == raised == shove == 0
 
 
 def test_tracks_answers_to_all_ins_separately():
@@ -66,6 +67,31 @@ def test_tracks_answers_to_all_ins_separately():
               ("all_in_preflop", "all_in_postflop")]
     assert sum(count[1] for count in counts) > 0
     assert all(count[0] == 0 for count in counts)
+
+
+def test_showdowns_teach_what_bets_mean():
+    model = StrictModel()
+    play(model, DUMMIES["random"](seed=1), 400)
+    reads = model.reads["them"]
+    # A random bot bets junk often, so bluffs must have been seen.
+    assert reads["bluffs"] > 0 and reads["value_bets"] > 0
+    assert reads["preflop_raises"] > 0
+
+
+def test_showdown_learning_can_be_switched_off(monkeypatch):
+    monkeypatch.setattr("model.SHOWDOWN_LEARNING", 0.0)
+    model = StrictModel()
+    play(model, DUMMIES["random"](seed=1), 30)
+    assert model.reads == {}
+
+
+def test_weak_hands_kept_as_bluffs_leave_the_range_in_order():
+    model = StrictModel()
+    model.seed([], 0)
+    order = {combo: index for index, combo in enumerate(model.range)}
+    model._keep_slice(0.0, 0.2, 0.5)
+    positions = [order[combo] for combo in model.range]
+    assert positions == sorted(positions)
 
 
 def test_range_narrows_after_a_raise():
